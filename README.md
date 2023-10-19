@@ -1,6 +1,8 @@
 # Flux TMC Multi-tenant
 
-This repo serves as a starting point for managing multi-tenant clusters using Flux and TMC.In this case what we mean by multi-tenant is that different teams can share a K8s cluster and have access to self service namespaces in that cluster but not be able to interfere with other teams namespaces in the same cluster. This does not get into network policy for locking down namespace networking, that is out of scope.  The overall goal of this repo is to give an base template an example of a real world flux multiteant use case with TMC. The structure of this repo accounts for multiple environments and clusters and is meant to be able to represent an enterprise environment.
+This repo serves as a starting point for managing multi-tenant clusters using Flux and Tanzu Mission Control. 
+
+This repo defines multi-tenant by allowing different teams to share a Kubernetes cluster, enable access to self service namespaces within a cluster, but prevent interferance across teams' namespaces in the same cluster. This repo does dive into network policy for locking down namespace networking, that is out of scope.  The overall goal of this repo is to provide a base template example of a real world flux multiteant use case with Tanzu Mission Control. The structure of this repo accounts for multiple environments and clusters, representing an enterprise environment.
 
 ## Associated repos
 
@@ -22,10 +24,10 @@ Here are the repos for the tenants that are mentioned throughout this doc.
 
 ## Roles
 
-**Platform Admin**
+**Platform Engineer / Kubernetes Admin**
 
-* Has admin access to TMC
-* Has admin access to all k8s clusters
+* Has admin access to Tanzu Mission Control (TMC)
+* Has admin access to all Kubernetes clusters
 * Manages the "infra-ops" cluster
 * Manages cluster wide resources
 * Onboards the tenant’s main `GitRepository` and `Kustomization`
@@ -33,26 +35,26 @@ Here are the repos for the tenants that are mentioned throughout this doc.
 
 **Tenant**
 
-* Has self service namespace creation
+* Has self service namespace creation authorization
 * Has admin access to the namespaces they create 
 * Manages `GitRepositories`, `Kustomizations`, `HelmRepositories` and `HelmReleases` in their namespaces
-* has editor access into thier TMC workspace
+* Has editor access into their Tanzu Mission Control workspace
 
-## How it works
+## How it Works
 
-TMC has the concept of a workspace which can group multiple namespaces across clusters under a single space. Using this concept we can create a tenancy model around namespaces in a cluster. This workspace concept is core to the multitenancy in this repo. The way this tenancy model works is this:
+TMC has the concept of a workspace to group multiple namespaces across multiple clusters (and clouds) under a single logical construct. Using this concept we can create a tenancy model around namespaces in a cluster. This workspace concept is core to the multitenancy in this repo. The way this tenancy model works is this:
 
-*  tenants get their own workspace and using TMC permissions we can ensure they are not able to access namespaces outside of their workspace as a logged in user
+*  Tenants get their own workspace and using TMC permissions we can ensure they are not able to access namespaces outside of their workspace as a logged in user
 *  A flux bootstrap namespace and service account is created for each tenant, this namespace is where the initial kustomization for flux is deployed by the platform admin.
 *  The bootstrap namespace service account is given permissions in TMC to the workspace. *** This is a key piece in that TMC handles propogating the permissions on the service account to access the tenants other namespaces. without TMC doing this another tool is needed to handle this, it's not native to k8s. ***
-*  A TMC custom OPA policy is used to enforce that the tenants kustomizations and other flux reosurces use a service account. this prevents the flux controller from operating as cluster admin. This si cirtical in limiting the tenants access.
+*  A TMC custom Open Policy Agent (OPA) policy is used to enforce that the tenants kustomizations and other flux reosurces use a service account. this prevents the flux controller from operating as cluster admin. This si cirtical in limiting the tenants access.
 *  Enforcing namespace creation through flux allows for the platform admins to overwrite the critical fields to make sure namespaces are created in the right workspace.
 
-### Clustergroup bootstrapping
+### Cluster Group Bootstrapping
 
 One key element to this setup is how every cluster gets bootstrapped with the right flux config and paths. The approach used here is to only enable the TMC CD components at the clustergroup level. The typical challenge with this approach is that setting a `kustomization` at the clustergroup level means you cannot override the path per cluster and means everything needs to be the same in each cluster. This is not the case in most situations so in order for this to work we need every cluster to be able to override clustergroup configuration. This is done by using a combination of carvel tooling, tmc provided information and flux variables injection. Here is a breakdown of the process.
 
-1. when a clustergroup kustomization is created it will point to the folder `clustergroups/<groupname>`
+1. When a Cluster group kustomization is created it will point to the folder `clustergroups/<groupname>`
 2. from there two other kustomizations are created `clustergroup-gitops` and `group-apps`
 3. `group-apps` points to `apps/clustergroups/<groupname>` which defines any group level apps that need to be installed. most importantly it installs the `apps/base/cluster-name-secret` 
 4. the `cluster-name-secret` app in this case is using [carvel secretgen](https://github.com/carvel-dev/secretgen-controller) to create a secret containing the cluster name from the tmc provided configmap `stack-config` and then using a `secretExport` and `secretImport` to copy that secret into the `tanzu-continous-delivery-resources` namespace.
@@ -61,7 +63,7 @@ One key element to this setup is how every cluster gets bootstrapped with the ri
 
 Using this structure we can now set a single kustomization at the clustergroup level and have it dynamically create cluster specific `kustomizations` 
 
-## Multi Tenant Architecture
+## Multi-tenant Architecture
 
 This architecture is simplified and does not show all of the details but it highlights a few key components which are the tenancy with workspaces, the infra-ops cluster, and the use of different repos and flux.
 
@@ -70,7 +72,7 @@ This architecture is simplified and does not show all of the details but it high
 
 The platform admin repo has the following directories
 ### clustergroups 
- this contains directories with Flux config for each group. This is where the base bootstrap config lives. This is used when initially configuring a cluster group's `Kustomization` in TMC. Everything is initiated from here. 
+ This contains directories with Flux config for each group. This is where the base bootstrap config lives. This is used when initially configuring a cluster group's `Kustomization` in TMC. Everything is initiated from here. 
 
 ```
 clustergroups
@@ -87,7 +89,7 @@ subdirectories:
 * `common/per-cluster` -  this holds the `kustomization` that is dynamically created for each cluster that is mentioned in the clustergroup boostrapping section.
 * `clustergroup-name` - folder per cluster group with configs for that clustergroup.
 
-### clusters
+### Clusters
 
 This contains directories with Flux config for each cluster. This is what will hold each clusters base configuration that gets boostrapped from the cluster group.
 
@@ -106,7 +108,7 @@ subdirectories/files:
 `infrastructure.yml` - sets up the cluster specifc kustomization ponting to the clusters directory `infrastructure` directory. 
 `tenants.yml` -  this is a single kustomization with a patch that defines each tenant into the [helm chart](https://github.com/warroyo/flux-tmc-multitenant/tree/main/tenant-generator) values. This is used for bootstrapping tenants on a cluster
 
-### infrastructure
+### Infrastructure
 
 Contains config to install common infra tools per environment. This idea here is that `infrastructure` is used for installing tools that are more infra focused (ex. external secrets operator) per environment and the `apps`  directory is used for more general apps/config per cluster.
 
@@ -132,7 +134,7 @@ subdirectories/files:
 * `env/<environment>` - holds the configuration for which apps to install in that environment.
 * `env/<environment>/<some-app>` - holds any environment specific overrides for that app.
 
-### apps
+### Apps
 
 Contains all of the app configs that will be installed per cluster or clustergroup. Also allows for environment specific overrides if necessary.
 
@@ -169,7 +171,7 @@ some good examples of different ways to override settings can be found in the fo
 * `apps/clusters/iris-dev` - this shows how to use an env override with the `components` directive for external-secrets. It also shows how to do an override specific to the cluster using the inline patches to add an override values file for contour.
 * 
 
-### bootstrap
+### Bootstrap
 
 this directory holds the template for the azure-sp credential to setup secrets managment.
 
@@ -177,16 +179,16 @@ this directory holds the template for the azure-sp credential to setup secrets m
  bootstrap
  └── azure-secret.yaml
 ```
-### tmc
+### Tanzu Mission Control
 
 Contains any yaml needed for creating TMC objects with the CLI. 
 
 
-## Tenant repo structure
+## Tenant Repo Structure
 
 The tenant repo has the following directories
 
-### clusters
+### Clusters
 this has a directory for each cluster. this will be the reference point for the tenants configured in the platform admin repo. This is used as a bootstrap for the tenant to configure their own kustomizations. 
 
 
@@ -213,7 +215,7 @@ In the next few sections it will refer to an "infra-ops" cluster. This cluster i
 
  
 
-### Create initial cluster groups
+### Create Initial Cluster Groups
 
 For this setup we will have the following cluster groups. Since we are implementing multitenancy we will also assume that there will be multiple dev teams using a single cluster separated by namespace. 
 
@@ -514,7 +516,7 @@ az keyvault secret set --vault-name "ss-env" --name "tmc-csp-token" --value "<tm
 az keyvault secret set --vault-name "ss-env" --name "tmc-host" --value "<tmc-hostname>"
 ```
 
-#### Setup the bootstrap Kustomization
+#### Setup the Bootstrap Kustomization
 
 By enabling this bootstrap kustomization it will start the process of installing all of the required tools on the infra-ops clusters. 
 
@@ -540,7 +542,7 @@ Here is a breakdown on what gets installed and how. This does not cover the init
 
 
 
-### Summary of initial setup
+### Summary of Initial Setup
 
 At this point all of the one time setup has been complete. This means that we can now onboard tenants and/or new clusters. 
 
@@ -557,7 +559,7 @@ Here is a summary of what was created:
 * secrets management setup with AKV
 
 
-## Add a tenant to a cluster
+## Add a Tenant to a Cluster
 
 For this step we will walk through adding a tenant to a clustergroup. This will use pre-existing configuration from this repo. In another section we will cover creating a tenant from scratch.
 
@@ -609,11 +611,11 @@ NAMESPACE↑                                   NAME                            R
 ```
 
 
-## Adding a new cluster
+## Adding a New Cluster
 
 This will outline adding a new cluster to an existing environment, the process would be similar for adding an environment but you would just need to add more folders for the environment specific pieces.
 
-### Platform admin Tasks
+### Platform Admin Tasks
 
 1. create the cluster and add it to the appropriate cluster group
 2. if using secret management be sure to create the bootstrap credential in the newly created cluster
@@ -626,19 +628,19 @@ This will outline adding a new cluster to an existing environment, the process w
 7.  create a `kustomization.yml` in that directory with the references to the apps you want installed in that cluster.
 
 
-### Tenant tasks
+### Tenant Tasks
 
 These steps would only be done if the tenant was added to the new cluster. The steps are the same as the steps below for adding a new Tenant.
 
 
 
-## Adding a new tenant
+## Adding a New Tenant
 
 These steps should be completed any time a new team is wanting to be onboarded. These steps are outlined with commands referencing this repo's setup but these could be adpated to be done generically.
 
 using `iris-red` as the new tenant.
 
-### Platform admin tasks
+### Platform Admin Tasks
 
 1. create a new workspace in TMC for the team. 
 
@@ -669,7 +671,7 @@ tanzu tmc iam update-policy -s workspace -n iris-red -f tmc/iam/sa-rb-workspace-
    5. ability to do NS self service
    6. intial flux config so they can start installing apps.
 
-### Tenant tasks
+### Tenant Tasks
 
 The tenant tasks will vary based on what the tenant wants to do but here is the minimum required to get things working.
 
@@ -689,7 +691,7 @@ mkdir -p clusters/iris-dev/namespaces
 
 
 
-### Automation ideas
+### Automation Ideas
 
 In the steps above we used a helm chart to generate most of our tenant yaml. More automation could be done here or this could be done in another way. Here are some ideas.
 
@@ -698,7 +700,7 @@ In the steps above we used a helm chart to generate most of our tenant yaml. Mor
 * Simple bash scripts to create the files. 
 * CLI scaffolding generator tooling
 
-## Self Service a namespace
+## Self Service a Namespace
 
 The setup in the repo allows for tenants to self service namespaces. This is done using TMC workspaces, without a TMC workspaces this problem is someone hard to solve and requires other 3rd party tools. Additionally we want self service through gitops, to solve this problem the [TMC controller](https://github.com/warroyo/metacontrollers/tree/main/tmc-controller) was created. So what is enabled is the ability for a tenant to put TMC namespace configs into a directory in thier tenant git repo and it will create them and give them permissions to those namespaces automatically.
 
